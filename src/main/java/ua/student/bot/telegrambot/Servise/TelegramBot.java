@@ -27,13 +27,21 @@ import java.util.List;
 @Slf4j
 @Component
 public class TelegramBot extends TelegramLongPollingBot {
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
     private final BotConfig botConfig;
-    static final String HELP_TEXT = "This bot was created to demonstration Spring capabilities.\n\n"+
-            "You can execute commands from the main menu on the left or by typing a command:\n\n" +
-            "Type /start to see a welcome message\n\n" +
-            "Type /mydata to see data stored about yourself\n\n" +
-            "Type /help to see this message again";
+    static final String HELP_TEXT = """
+            This bot was created to demonstration Spring capabilities.
+
+            You can execute commands from the main menu on the left or by typing a command:
+
+            Type /start to see a welcome message
+
+            Type /mydata to see data stored about yourself
+
+            Type /help to see this message again""";
+    static final String YES_BUTTON = "YES_BUTTON";
+    static final String NO_BUTTON = "NO_BUTTON";
+    static final String ERROR_MESSAGE = "Error occurred: ";
     public TelegramBot(UserRepository userRepository, BotConfig botConfig) {
         this.userRepository = userRepository;
         this.botConfig = botConfig;
@@ -70,55 +78,50 @@ public class TelegramBot extends TelegramLongPollingBot {
             String messageText = update.getMessage().getText();
            long chatId = update.getMessage().getChatId();
 
+//  Отправка сообщений всем пользователям. Пишем /send лваылваыва. Код читает после пробела и отправляет всем пользователям
+            // Плохо реализовано админка и пользователь. Её просто нет. Прописывается в конфигах chatId как владелец.
+            // Никакой уничерсальности или установки при запуске Арр
+           if(messageText.contains("/send") && botConfig.getOwnerID() == chatId) {
+               var textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
+               var users = userRepository.findAll();
+               for(User user: users){
+                   sendMessage(chatId,textToSend);
+               }
+           }
 
-            switch (messageText){
-                case "/start":
+           else {
 
-                    addUser(update.getMessage());
-                    startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
-                    break;
-                case "/help":
-                    sendMessage(chatId,HELP_TEXT);
-                    break;
-                case "/register":
-                    register(chatId);
-                    break;
-                default:
-                    sendMessage(chatId,"Sorry, the command was not recognized");
+               switch (messageText) {
+                   case "/start":
 
-            }
+                       addUser(update.getMessage());
+                       startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
+                       break;
+                   case "/help":
+                       prepareAndSendMessage(chatId, HELP_TEXT);
+                       break;
+                   case "/register":
+                       register(chatId);
+                       break;
+                   default:
+                       prepareAndSendMessage(chatId, "Sorry, the command was not recognized");
+
+               }
+           }
 //      Проверка на то что пришол не текст ка срабатывание кнопок (непосредственно под сообщением)
         } else if (update.hasCallbackQuery()) {
             String callBackData = update.getCallbackQuery().getData();
             long messageId = update.getCallbackQuery().getMessage().getMessageId();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
 
-            if(callBackData.equals("YES_BUTTON")){
+            if(callBackData.equals(YES_BUTTON)){
                 String text = "You press YES";
-                EditMessageText message = new EditMessageText();//Меняем текст сообщения. Стого где есть вопрос и кнопки. На новый.
-                message.setChatId(chatId);
-                message.setText(text);
-                message.setMessageId((int) messageId);
-
-                try {
-                    execute(message);
-                }catch (TelegramApiException e){
-                    log.error("Error occurred: " + e.getMessage());
-                }
+                executeEditMessageText(chatId,text,messageId);
             }
 
-            if(callBackData.equals("NO_BUTTON")){
+            if(callBackData.equals(NO_BUTTON)){
                 String text = "You press NO";
-                EditMessageText message = new EditMessageText();//Меняем текст сообщения. Стого где есть вопрос и кнопки. На новый.
-                message.setChatId(chatId);
-                message.setText(text);
-                message.setMessageId((int) messageId);
-
-                try {
-                    execute(message);
-                }catch (TelegramApiException e){
-                    log.error("Error occurred: " + e.getMessage());
-                }
+                executeEditMessageText(chatId,text,messageId);
             }
         }
     }
@@ -134,12 +137,12 @@ public class TelegramBot extends TelegramLongPollingBot {
         var yesButton = new InlineKeyboardButton();//Сами кнопки ряда
 
         yesButton.setText("YES");// Это кнопка
-        yesButton.setCallbackData("YES_BUTTON");// Это идентификатор Кнопни. Его уникальный ID. Для понимания ботом какая кнопка нажата.
+        yesButton.setCallbackData(YES_BUTTON);// Это идентификатор Кнопни. Его уникальный ID. Для понимания ботом какая кнопка нажата.
 
         var noButton = new InlineKeyboardButton();//Сами кнопки ряда
 
         noButton.setText("NO");// Это кнопка
-        noButton.setCallbackData("NO_BUTTON");// Это идентификатор Кнопни. Его уникальный ID. Для понимания ботом какая кнопка нажата.
+        noButton.setCallbackData(NO_BUTTON);// Это идентификатор Кнопни. Его уникальный ID. Для понимания ботом какая кнопка нажата.
 
         rowInLine.add(yesButton);// Добовляем кнопки в список
         rowInLine.add(noButton);
@@ -148,11 +151,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         markupInLine.setKeyboard(rowsInLine);
         message.setReplyMarkup(markupInLine);
 
-        try {
-            execute(message);
-        }catch (TelegramApiException e){
-            log.error("Error occurred: " + e.getMessage());
-        }
+        executeMessage(message);
     }
 
     private void addUser(Message msg) {
@@ -171,7 +170,6 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-
     //    Ответ на нажатие /start
     private void startCommandReceived (long chatId,String name){
 // добавил смайлик!!! blush
@@ -180,6 +178,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         log.info("Replied to user " + name);
         sendMessage(chatId,answer);
     }
+
     private void sendMessage (long chatId, String textToSend){
 
         SendMessage message = new SendMessage();
@@ -205,12 +204,31 @@ public class TelegramBot extends TelegramLongPollingBot {
         keyboardMarkup.setKeyboard(rowList);
 
         message.setReplyMarkup(keyboardMarkup);
+        executeMessage(message);
+    }
+    private void executeEditMessageText(long chatId,String text,long messageId){
+        EditMessageText message = new EditMessageText();//Меняем текст сообщения. Стого где есть вопрос и кнопки. На новый.
+        message.setChatId(chatId);
+        message.setText(text);
+        message.setMessageId((int) messageId);
+
         try {
             execute(message);
         }catch (TelegramApiException e){
-            log.error("Error occurred: " + e.getMessage());
+            log.error(ERROR_MESSAGE + e.getMessage());
         }
-
-
+    }
+    private void executeMessage(SendMessage message){
+        try {
+            execute(message);
+        }catch (TelegramApiException e){
+            log.error(ERROR_MESSAGE + e.getMessage());
+        }
+    }
+    private void prepareAndSendMessage(long chatId,String textToSend){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        executeMessage(message);
     }
 }
